@@ -22,7 +22,7 @@ requires-python = ">=3.10"
 dev = ["pytest", "black", "pre-commit"]
 
 [tool.setuptools]
-packages = ["nfv"]
+packages = { find = { where = ["."] } }
 
 [tool.ruff]
 line-length = 129
