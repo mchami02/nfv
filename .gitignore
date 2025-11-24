@@ -12,3 +12,4 @@ tmp/
 .vscode/
 misc_paper/
 datasets/drone_data/
+build/

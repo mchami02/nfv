@@ -29,8 +29,7 @@ def LaxHopf(ic, nx, nt, dx, dt, flow, dtype, device, **kwargs):
     tmax = dt * Nt
 
     # ic_xs_unique = torch.linspace(0, xmax, ic_ks.shape[1] + 1, device=device, dtype=dtype)
-    ic_xs_unique = torch.Tensor(ic[0].xs * xmax).to(device).to(dtype)  # we add noise to the x-coordinates directly in ic.xs
-    ic_xs = ic_xs_unique.unsqueeze(0).repeat(batch_size, 1)
+    ic_xs = torch.Tensor(np.array([ic_i.xs * xmax for ic_i in ic])).to(device).to(dtype)  # we add noise to the x-coordinates directly in ic.xs
 
     # randomize x positions (maybe...)
     # ic_xs += torch.empty(batch_size, ic_xs.shape[1], device=device).uniform_(
