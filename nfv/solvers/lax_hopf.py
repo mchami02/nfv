@@ -52,9 +52,11 @@ def LaxHopf(ic, nx, nt, dx, dt, flow, dtype, device, **kwargs):
         bi.append(b)
     bi = torch.stack(bi).to(device).T
 
-    t = torch.arange(0, tmax, dt, device=device, dtype=dtype).view(1, -1, 1, 1)
+    # Use linspace instead of arange to guarantee exact number of points
+    # (arange with floating-point step can produce inconsistent counts)
+    t = torch.linspace(0, tmax - dt, Nt, device=device, dtype=dtype).view(1, -1, 1, 1)
     t[:, 0, :, :] = 1e-9
-    x = torch.arange(0, xmax, dx, device=device, dtype=dtype).view(1, 1, -1, 1)
+    x = torch.linspace(0, xmax - dx, Nx, device=device, dtype=dtype).view(1, 1, -1, 1)
 
     xi = ic_xs.view(batch_size, 1, 1, -1)
 
