@@ -2,44 +2,42 @@ import numpy as np
 import torch
 
 
-def LaxHopf(ic, nx, nt, dx, dt, flow, dtype, device, **kwargs):
-    n_points_integral = 10
+def _lax_hopf_core(ic, xmax, x_positions, nt, dt, flow, dtype, device):
+    """Core Lax-Hopf computation at arbitrary x positions.
 
+    Args:
+        ic: list of PiecewiseConstant ICs
+        xmax: domain length
+        x_positions: 1D tensor of shape (Nx,) — where to evaluate solution
+        nt: number of time steps
+        dt: time step
+        flow: flow model
+        dtype, device: torch config
+
+    Returns:
+        rho: tensor of shape (batch, nt, Nx)
+    """
     if dtype == torch.float32:
         raise ValueError(
             "Lax hopf solver requires torch64 dtype to be accurate (for 32 bit to work, remove the lines ic_xs[:, 0] = -1e9 and ic_xs[:, -1] = 1e9)"
         )
 
-    Nx = nx * n_points_integral
+    Nx = len(x_positions)
     Nt = nt
-    dx = dx / n_points_integral
-    dt = dt
-    device = device
+    tmax = dt * Nt
 
     ic_ks = np.array([x.ks for x in ic])
     ic_ks = torch.from_numpy(ic_ks).to(dtype).to(device)
 
-    flow = flow
-
     flow = {"vmax": flow.vmax, "w": flow.w, "q": flow.q, "qp": flow.qp, "R": flow.R, "Rp": flow.Rp, "kmax": flow.kmax}
 
-    # Define initial conditions
     batch_size = ic_ks.shape[0]
-    xmax = dx * Nx
-    tmax = dt * Nt
 
-    # ic_xs_unique = torch.linspace(0, xmax, ic_ks.shape[1] + 1, device=device, dtype=dtype)
-    ic_xs = torch.Tensor(np.array([ic_i.xs * xmax for ic_i in ic])).to(device).to(dtype)  # we add noise to the x-coordinates directly in ic.xs
-
-    # randomize x positions (maybe...)
-    # ic_xs += torch.empty(batch_size, ic_xs.shape[1], device=device).uniform_(
-    #     -(xmax / ic_ks.shape[1]) / 3, (xmax / ic_ks.shape[1]) / 3
-    # )
+    ic_xs = torch.Tensor(np.array([ic_i.xs * xmax for ic_i in ic])).to(device).to(dtype)
 
     # consider it as a problem on R
     ic_xs[:, 0] = -1e9
     ic_xs[:, -1] = 1e9
-    # ic_xs = ic_xs.to(dtype)
 
     ic_ks = ic_ks.to(device)
 
@@ -52,11 +50,9 @@ def LaxHopf(ic, nx, nt, dx, dt, flow, dtype, device, **kwargs):
         bi.append(b)
     bi = torch.stack(bi).to(device).T
 
-    # Use linspace instead of arange to guarantee exact number of points
-    # (arange with floating-point step can produce inconsistent counts)
     t = torch.linspace(0, tmax - dt, Nt, device=device, dtype=dtype).view(1, -1, 1, 1)
     t[:, 0, :, :] = 1e-9
-    x = torch.linspace(0, xmax - dx, Nx, device=device, dtype=dtype).view(1, 1, -1, 1)
+    x = x_positions.view(1, 1, -1, 1)
 
     xi = ic_xs.view(batch_size, 1, 1, -1)
 
@@ -98,12 +94,47 @@ def LaxHopf(ic, nx, nt, dx, dt, flow, dtype, device, **kwargs):
     del i_store
     rho = _rho_c0(t.squeeze(-1), x.squeeze(-1), xi.squeeze(-1), xip1.squeeze(-1), ki.squeeze(-1), flow=flow)
 
-    # BTX
+    return rho
+
+
+def LaxHopf(ic, nx, nt, dx, dt, flow, dtype, device, **kwargs):
+    n_points_integral = 10
+    Nx = nx * n_points_integral
+    xmax = dx * nx
+    dx_fine = dx / n_points_integral
+    x_positions = torch.linspace(0, xmax - dx_fine, Nx, device=device, dtype=dtype)
+
+    rho = _lax_hopf_core(ic, xmax, x_positions, nt, dt, flow, dtype, device)
+
+    # Average 10 sub-cell points per cell
     rho = rho.view(-1, nt, nx, n_points_integral).mean(dim=-1)
 
-    ic_discretized = np.array([ic.discretize(nx) for ic in ic])
-    ic_discretized = torch.from_numpy(ic_discretized).to(dtype).to(device)
-    rho[:, 0, :] = ic_discretized
+    # Override t=0 with discretized IC (cell averages)
+    ic_discretized = np.array([ic_i.discretize(nx) for ic_i in ic])
+    rho[:, 0, :] = torch.from_numpy(ic_discretized).to(dtype).to(device)
+
+    return rho
+
+
+def _evaluate_pointwise_ic(ic_list, nx, dtype, device):
+    """Evaluate piecewise-constant ICs at cell centers (pointwise, not averaged)."""
+    centers = np.linspace(0.5 / nx, 1.0 - 0.5 / nx, nx)
+    result = np.empty((len(ic_list), nx))
+    for b, ic in enumerate(ic_list):
+        indices = np.searchsorted(ic.xs, centers, side='right') - 1
+        indices = np.clip(indices, 0, len(ic.ks) - 1)
+        result[b] = ic.ks[indices]
+    return torch.from_numpy(result).to(dtype).to(device)
+
+
+def LaxHopfPointWise(ic, nx, nt, dx, dt, flow, dtype, device, **kwargs):
+    xmax = dx * nx
+    x_positions = torch.linspace(dx / 2, xmax - dx / 2, nx, device=device, dtype=dtype)
+
+    rho = _lax_hopf_core(ic, xmax, x_positions, nt, dt, flow, dtype, device)
+
+    # Override t=0 with pointwise IC at cell centers
+    rho[:, 0, :] = _evaluate_pointwise_ic(ic, nx, dtype, device)
 
     return rho
 

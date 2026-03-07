@@ -4,7 +4,7 @@ from .eno import ENO
 from .finite_volume import FVM
 from .godunov import Godunov
 from .lax_friedrichs import LaxFriedrichs
-from .lax_hopf import LaxHopf
+from .lax_hopf import LaxHopf, LaxHopfPointWise
 from .weno import WENO
 
-__all__ = ["FVM", "Godunov", "LaxHopf", "LaxFriedrichs", "EngquistOsher", "ENO", "WENO"]
+__all__ = ["FVM", "Godunov", "LaxHopf", "LaxHopfPointWise", "LaxFriedrichs", "EngquistOsher", "ENO", "WENO"]
